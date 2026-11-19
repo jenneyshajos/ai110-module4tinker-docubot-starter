@@ -13,11 +13,14 @@ Experiment with:
 """
 
 import os
+import time
 from google import genai
 
 # Central place to update the model name if needed.
 # You can swap this for a different Gemini model in the future.
-GEMINI_MODEL_NAME = "gemini-flash-lite-latest"
+# Note: "gemini-flash-lite-latest" and "gemini-2.5-flash-lite" both returned
+# 404 NOT_FOUND for this API key; the API recommended gemini-3.5-flash-lite.
+GEMINI_MODEL_NAME = "gemini-3.5-flash-lite"
 
 
 class GeminiClient:
@@ -41,6 +44,25 @@ class GeminiClient:
 
         self.client = genai.Client(api_key=api_key)
 
+    def _generate(self, prompt, attempts=4):
+        """
+        Calls Gemini, retrying a few times on temporary overload errors
+        (503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED). Other errors are raised
+        immediately so the callers' error messages still show them.
+        """
+        for attempt in range(attempts):
+            try:
+                response = self.client.models.generate_content(
+                    model=GEMINI_MODEL_NAME,
+                    contents=prompt
+                )
+                return (response.text or "").strip()
+            except Exception as e:
+                temporary = "503" in str(e) or "429" in str(e)
+                if not temporary or attempt == attempts - 1:
+                    raise
+                time.sleep(2 ** attempt)  # 1s, 2s, 4s
+
     # -----------------------------------------------------------
     # Phase 0: naive generation over full docs
     # -----------------------------------------------------------
@@ -52,11 +74,7 @@ class GeminiClient:
     Answer this developer question: {query}
     """
         try:
-            response = self.client.models.generate_content(
-                model=GEMINI_MODEL_NAME,
-                contents=prompt
-            )
-            return (response.text or "").strip()
+            return self._generate(prompt)
         except Exception as e:
             return f"Unable to generate an answer. ({type(e).__name__}: {e})"
 
@@ -113,10 +131,6 @@ Rules:
 """
 
         try:
-            response = self.client.models.generate_content(
-                model=GEMINI_MODEL_NAME,
-                contents=prompt
-            )
-            return (response.text or "").strip()
+            return self._generate(prompt)
         except Exception as e:
             return f"API error — could not generate answer. ({type(e).__name__}: {e})"
